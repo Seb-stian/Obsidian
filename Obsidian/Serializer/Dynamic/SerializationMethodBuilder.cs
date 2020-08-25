@@ -23,16 +23,87 @@ namespace Obsidian.Serializer.Dynamic
             readMethods = GetStreamMethods<ReadMethod>();
         }
 
-        internal static MethodInfo BuildSerializationMethod<T>() where T : Packet
+        internal static PacketSerializer.SerializeDelegate BuildSerializationMethod<T>() where T : Packet
         {
-            throw new NotImplementedException();
+            var type = typeof(T);
+            var fields = GetFields(type).OrderBy((member) => member.Item2.Order);
+
+            var dynamicMethod = new DynamicMethod($"Serialize{type.Name}",
+                                                  MethodAttributes.Public | MethodAttributes.Static,
+                                                  CallingConventions.Standard,
+                                                  returnType: typeof(void),
+                                                  parameterTypes: new[] { typeof(MinecraftStream), typeof(Packet) },
+                                                  owner: type,
+                                                  skipVisibility: true);
+            var il = dynamicMethod.GetILGenerator();
+
+            foreach (var (member, attribute) in fields)
+            {
+                if (member is FieldInfo field)
+                {
+                    DataType fieldType = attribute.Type != DataType.Auto ? attribute.Type : field.FieldType.ToDataType();
+
+                    // TODO: move this to PacketExtensions.ToDataType(), once everything works with SerializationMethodBuilder
+                    if (field.FieldType == typeof(byte[])) fieldType = DataType.ByteArray;
+                    // TODO: remove this once packet attributes are changed
+                    if (fieldType == DataType.Position)
+                    {
+                        if (field.FieldType == typeof(Transform))
+                            fieldType = DataType.Transform;
+                        else if (field.FieldType == typeof(SoundPosition))
+                            fieldType = DataType.SoundPosition;
+                        else if (attribute.Absolute)
+                            fieldType = DataType.AbsolutePosition;
+                    }
+
+                    if (fieldType == DataType.Auto || !writeMethods.TryGetValue(fieldType, out var writeMethod))
+                    {
+                        throw new NotSupportedException(fieldType.ToString());
+                    }
+
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldarg_1);
+                    il.Emit(OpCodes.Ldfld, field);
+                    il.Emit(OpCodes.Callvirt, writeMethod);
+                }
+                else if (member is PropertyInfo property)
+                {
+                    DataType propertyType = attribute.Type != DataType.Auto ? attribute.Type : property.PropertyType.ToDataType();
+
+                    // TODO: move this to PacketExtensions.ToDataType(), once everything works with SerializationMethodBuilder
+                    if (property.PropertyType == typeof(byte[])) propertyType = DataType.ByteArray;
+                    // TODO: remove this once packet attributes are changed
+                    if (propertyType == DataType.Position)
+                    {
+                        if (property.PropertyType == typeof(Transform))
+                            propertyType = DataType.Transform;
+                        else if (property.PropertyType == typeof(SoundPosition))
+                            propertyType = DataType.SoundPosition;
+                        else if (attribute.Absolute)
+                            propertyType = DataType.AbsolutePosition;
+                    }
+
+                    if (propertyType == DataType.Auto || !writeMethods.TryGetValue(propertyType, out var writeMethod))
+                    {
+                        throw new NotSupportedException(propertyType.ToString());
+                    }
+
+                    il.Emit(OpCodes.Ldarg_0);
+                    il.Emit(OpCodes.Ldarg_1);
+                    il.Emit(OpCodes.Callvirt, property.GetMethod);
+                    il.Emit(OpCodes.Callvirt, writeMethod);
+                }
+            }
+
+            il.Emit(OpCodes.Ret);
+
+            return (PacketSerializer.SerializeDelegate)dynamicMethod.CreateDelegate(typeof(PacketSerializer.SerializeDelegate));
         }
 
         internal static PacketSerializer.DeserializeDelegate BuildDeserializationMethod<T>() where T : Packet
         {
             var type = typeof(T);
             var fields = GetFields(type).OrderBy((member) => member.Item2.Order);
-            var streamMethods = typeof(MinecraftStream).GetMethods(PacketExtensions.Flags);
 
             var dynamicMethod = new DynamicMethod($"Deserialize{type.Name}",
                                                   MethodAttributes.Public | MethodAttributes.Static,
@@ -67,7 +138,7 @@ namespace Obsidian.Serializer.Dynamic
 
                     if (fieldType == DataType.Auto || !readMethods.TryGetValue(fieldType, out var readMethod))
                     {
-                        throw new NotSupportedException();
+                        throw new NotSupportedException(fieldType.ToString());
                     }
 
                     il.Emit(OpCodes.Ldarg_0);
@@ -107,7 +178,7 @@ namespace Obsidian.Serializer.Dynamic
 
                         if (propertyType == DataType.Auto || !readMethods.TryGetValue(propertyType, out var readMethod))
                         {
-                            throw new NotSupportedException();
+                            throw new NotSupportedException(propertyType.ToString());
                         }
 
                         il.Emit(OpCodes.Ldarg_0);

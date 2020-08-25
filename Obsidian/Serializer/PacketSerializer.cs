@@ -14,9 +14,11 @@ namespace Obsidian.Serializer
 {
     public static class PacketSerializer
     {
-        internal delegate Packet DeserializeDelegate(MinecraftStream minecraftStream);
+        internal delegate void SerializeDelegate(MinecraftStream minecraftStream, Packet packet);
+        public delegate Packet DeserializeDelegate(MinecraftStream minecraftStream);
 
-        private static Dictionary<Type, DeserializeDelegate> deserializationMethodsCache = new Dictionary<Type, DeserializeDelegate>();
+        private static readonly Dictionary<Type, SerializeDelegate> serializationMethodsCache = new Dictionary<Type, SerializeDelegate>();
+        public static readonly Dictionary<Type, DeserializeDelegate> deserializationMethodsCache = new Dictionary<Type, DeserializeDelegate>();
 
         public static async Task SerializeAsync(Packet packet, MinecraftStream stream)
         {
@@ -34,8 +36,6 @@ namespace Obsidian.Serializer
 
             foreach (var (key, value) in valueDict)
             {
-                //await Program.PacketLogger.LogDebugAsync($"Writing value @ {dataStream.Position}: {value} ({value.GetType()})");
-
                 var dataType = key.Type;
 
                 if (dataType == DataType.Auto)
@@ -109,8 +109,25 @@ namespace Obsidian.Serializer
             return packet;
         }
 
+        public static async Task FastSerializeAsync<T>(T packet, MinecraftStream minecraftStream) where T : Packet
+        {
+            if (packet == null)
+                throw new ArgumentNullException(nameof(packet));
+
+            if (minecraftStream == null)
+                throw new ArgumentNullException(nameof(minecraftStream));
+
+            if (!serializationMethodsCache.TryGetValue(typeof(T), out var serializeMethod))
+                serializationMethodsCache.Add(typeof(T), serializeMethod = SerializationMethodBuilder.BuildSerializationMethod<T>());
+
+            serializeMethod(minecraftStream, packet);
+        }
+
         public static async Task<T> FastDeserializeAsync<T>(byte[] data) where T : Packet
         {
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
+
             await using var stream = new MinecraftStream(data);
 
             if (!deserializationMethodsCache.TryGetValue(typeof(T), out var deserializeMethod))
@@ -121,10 +138,52 @@ namespace Obsidian.Serializer
 
         public static T FastDeserialize<T>(MinecraftStream minecraftStream) where T : Packet
         {
+            if (minecraftStream == null)
+                throw new ArgumentNullException(nameof(minecraftStream));
+
             if (!deserializationMethodsCache.TryGetValue(typeof(T), out var deserializeMethod))
                 deserializationMethodsCache.Add(typeof(T), deserializeMethod = SerializationMethodBuilder.BuildDeserializationMethod<T>());
 
             return (T)deserializeMethod(minecraftStream);
         }
+
+        public static void PrewarmPacketSerialization<T>() where T : Packet
+        {
+            try
+            {
+                if (!serializationMethodsCache.ContainsKey(typeof(T)))
+                    serializationMethodsCache.Add(typeof(T), SerializationMethodBuilder.BuildSerializationMethod<T>());
+            }
+            catch
+            {
+
+            }
+
+            try
+            {
+                if (!deserializationMethodsCache.ContainsKey(typeof(T)))
+                    deserializationMethodsCache.Add(typeof(T), SerializationMethodBuilder.BuildDeserializationMethod<T>());
+            }
+            catch
+            {
+
+            }
+        }
+
+#nullable enable
+        public static void PrewarmAssemblyPackets(Assembly? assembly = null)
+        {
+            assembly ??= Assembly.GetCallingAssembly();
+            var prewarmMethod = typeof(PacketSerializer).GetMethod(nameof(PrewarmPacketSerialization));
+            foreach (var type in assembly.DefinedTypes)
+            {
+                if (type.IsSubclassOf(typeof(Packet)))
+                {
+                    var genericPrewarmMethod = prewarmMethod?.MakeGenericMethod(type);
+                    genericPrewarmMethod?.Invoke(null, Array.Empty<object>());
+                }
+            }
+        }
+#nullable disable
     }
 }
