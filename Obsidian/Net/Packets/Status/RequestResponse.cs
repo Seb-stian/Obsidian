@@ -1,16 +1,30 @@
 using Newtonsoft.Json;
-using Obsidian.Serializer.Attributes;
+using Obsidian.Entities;
+using Obsidian.Serialization.Attributes;
 using Obsidian.Util;
+using System.Threading.Tasks;
 
 namespace Obsidian.Net.Packets.Status
 {
-    public class RequestResponse : Packet
+    public partial class RequestResponse : IPacket
     {
         [Field(0)]
         public string Json;
 
-        public RequestResponse(string json) : base(0x00) => this.Json = json;
+        public int Id => 0x00;
 
-        public RequestResponse(ServerStatus status) : base(0x00) => this.Json = JsonConvert.SerializeObject(status);
+        public RequestResponse()
+        {
+        }
+
+        public RequestResponse(string json) => this.Json = json;
+
+        public RequestResponse(ServerStatus status) => this.Json = JsonConvert.SerializeObject(status);
+
+        public Task WriteAsync(MinecraftStream stream) => Task.CompletedTask;
+
+        public Task ReadAsync(MinecraftStream stream) => Task.CompletedTask;
+
+        public Task HandleAsync(Server server, Player player) => Task.CompletedTask;
     }
 }

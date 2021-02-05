@@ -1,17 +1,19 @@
-﻿using Obsidian.Items;
+﻿using Obsidian.API;
 using Obsidian.Net;
+using Obsidian.Util.Registry;
 using System;
 using System.Threading.Tasks;
 
 namespace Obsidian.Entities
 {
+    // TODO item entity has to have a MaterialType prop
     public class ItemEntity : Entity
     {
-        public int Id { get; set; }
+        public short Id { get; set; }
 
         public sbyte Count { get; set; }
 
-        public ItemNbt Nbt { get; set; }
+        public ItemMeta ItemMeta { get; set; }
 
         public bool CanPickup { get; set; }
 
@@ -21,12 +23,9 @@ namespace Obsidian.Entities
         {
             await base.WriteAsync(stream);
 
-            await stream.WriteEntityMetdata(7, EntityMetadataType.Slot, new ItemStack
+            await stream.WriteEntityMetdata(7, EntityMetadataType.Slot, new ItemStack(Registry.GetItem(this.Id).Type, this.Count, this.ItemMeta)
             {
-                Present = true,
-                Id = this.Id,
-                Count = this.Count,
-                Nbt = this.Nbt
+                Present = true
             });
         }
 
@@ -37,7 +36,7 @@ namespace Obsidian.Entities
             if (!CanPickup && this.TimeDropped.Subtract(DateTimeOffset.UtcNow).TotalSeconds > 5)
                 this.CanPickup = true;
 
-            foreach (var ent in this.World.GetEntitiesNear(this.Location, 1.5))
+            foreach (var ent in this.World.GetEntitiesNear(this.Position, 1.5f))
             {
                 if (ent is ItemEntity item)
                 {

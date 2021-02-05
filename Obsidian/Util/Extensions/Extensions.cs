@@ -1,14 +1,14 @@
-﻿using Obsidian.Blocks;
+﻿using Obsidian.API;
 using Obsidian.Entities;
 using Obsidian.Items;
-using Obsidian.Plugins;
-using Obsidian.Util.DataTypes;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
@@ -18,13 +18,73 @@ namespace Obsidian.Util.Extensions
     public static class Extensions
     {
         public static readonly Regex pattern = new Regex(@"[A-Z]{2,}(?=[A-Z][a-z]+[0-9]*|\b)|[A-Z]?[a-z]+[0-9]*|[A-Z]|[0-9]+");
-        public static bool NotFluid(this BlockState state) => !(state is BlockFluid);
+
+        public static bool IsAir(this ItemStack item) => item == null || item.Type == Material.Air;
+        // Source: https://stackoverflow.com/a/1415187
+        public static string GetDescription(this Enum value)
+        {
+                Type type = value.GetType();
+                string name = Enum.GetName(type, value);
+                if (name != null)
+                {
+                    FieldInfo field = type.GetField(name);
+                    if (field != null)
+                    {
+                        DescriptionAttribute attr = Attribute.GetCustomAttribute(field, typeof(DescriptionAttribute)) as DescriptionAttribute;
+                        if (attr != null)
+                        {
+                            return attr.Description;
+                        }
+                    }
+                }
+                return null;
+        }
+
+        /// <summary>
+        /// Gets the new slot value from varying inventory sizes and transforms it to a local inventory slot value
+        /// </summary>
+        /// <returns>The local slot value for a player inventory</returns>
+        public static (int slot, bool forPlayer) GetDifference(this short clickedSlot, int inventorySize)
+        {
+            inventorySize -= 1;
+
+            int sub = clickedSlot switch
+            {
+                _ when clickedSlot > inventorySize && (clickedSlot >= 54 && clickedSlot <= 89) => 45,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 27 && clickedSlot <= 62) => 18,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 17 && clickedSlot <= 52) => 9,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 14 && clickedSlot <= 49) => 5,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 11 && clickedSlot <= 46) => 2,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 10 && clickedSlot <= 45) => 1,
+                _ when clickedSlot <= inventorySize => 0,
+                _ => 0,
+            };
+
+            int add = clickedSlot switch
+            {
+                _ when clickedSlot > inventorySize && (clickedSlot >= 8 && clickedSlot <= 43) => 1,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 5 && clickedSlot <= 40) => 4,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 4 && clickedSlot <= 39) => 3,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 3 && clickedSlot <= 38) => 6,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 2 && clickedSlot <= 37) => 7,
+                _ when clickedSlot > inventorySize && (clickedSlot >= 1 && clickedSlot <= 36) => 8,
+                _ when clickedSlot <= inventorySize => 0,
+                _ => 0
+            };
+
+            return (add > 0 ? clickedSlot + add : clickedSlot - sub, sub > 0 || add > 0);
+        }
+
+        public static Item GetItem(this ItemStack itemStack)
+        {
+            return Registry.Registry.GetItem(itemStack.Type);
+        }
 
         public static int ToChunkCoord(this double value) => (int)value >> 4;
 
         public static int ToChunkCoord(this int value) => value >> 4;
 
-        public static (int x, int z) ToChunkCoord(this Position value) => ((int)value.X >> 4, (int)value.Z >> 4);
+        public static (int x, int z) ToChunkCoord(this PositionF value) => ((int)value.X >> 4, (int)value.Z >> 4);
 
         public static EnchantmentType ToEnchantType(this string source) => Enum.Parse<EnchantmentType>(source.Split(":")[1].Replace("_", ""), true);
 
@@ -43,7 +103,7 @@ namespace Obsidian.Util.Extensions
             if (string.IsNullOrEmpty(value))
                 throw new NullReferenceException(nameof(value));
 
-            return char.ToUpper(value[0]) + value.Substring(1);
+            return char.ToUpper(value[0]) + value[1..];
         }
 
         public static IEnumerable<KeyValuePair<Guid, Player>> Except(this ConcurrentDictionary<Guid, Player> source, params Guid[] uuids)
@@ -92,6 +152,11 @@ namespace Obsidian.Util.Extensions
             return amount;
         }
 
+        public static float NextSingle(this Random random)
+        {
+            return (float)random.NextDouble();
+        }
+
         // https://gist.github.com/ammaraskar/7b4a3f73bee9dc4136539644a0f27e63
         public static string MinecraftShaDigest(this byte[] data)
         {
@@ -114,10 +179,43 @@ namespace Obsidian.Util.Extensions
             }
         }
 
-        public static void TryRunSynchronously(this Task task)
+        public static Task TryRunSynchronously(this Task task)
         {
             if (task.Status == TaskStatus.Created)
                 task.RunSynchronously();
+            return task;
         }
+
+        #region Playing with coloring
+        public static void RenderColoredConsoleMessage(this string message, bool AddNewLine = false)
+        {
+            message = message.Replace("&", "§");
+            var msgLst = message.Contains("§") ? message.Split("§") : new string[] { $"r{message}" };
+            if (message[0] != '§' && msgLst.Length > 1) msgLst[0] = $"r{msgLst[0]}";
+            foreach (var msg in msgLst)
+            {
+                if (!string.IsNullOrEmpty(msg) && msg.Length > 1)
+                {
+                    var colorStr = msg[0].ToString().ToLower()[0];
+                    var consoleColor = ChatColor.FromCode(colorStr).ToConsoleColor();
+                    if (colorStr.IsRealChatColor())
+                    {
+                        if (colorStr == 'r') Console.ResetColor();
+                        else if (consoleColor.HasValue) Console.ForegroundColor = consoleColor.Value;
+                    }
+                    Console.Write(colorStr.IsRealChatColor() ? msg[1..] : msg);
+                }
+            }
+            Console.ResetColor();
+            if (AddNewLine) Console.WriteLine("");
+        }
+        public static bool IsRealChatColor(this string suspectedColor, bool skipPrefix = false) => (skipPrefix switch
+        {
+            true => new Regex("^([a-f]|r|o|m|n|k|l|[0-9])$"),
+            false => new Regex("^([§|&])([a-f]|r|o|m|n|k|l|[0-9])$")
+        }).IsMatch($"{suspectedColor.ToLower()}");
+    
+        public static bool IsRealChatColor(this char suspectedColor) => suspectedColor.ToString().ToLower().IsRealChatColor(true);
+        #endregion
     }
 }

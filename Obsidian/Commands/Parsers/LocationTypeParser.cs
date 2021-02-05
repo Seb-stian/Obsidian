@@ -1,36 +1,36 @@
-﻿using Obsidian.CommandFramework.ArgumentParsers;
-using Obsidian.CommandFramework.Entities;
-using Obsidian.Util.DataTypes;
+﻿using Obsidian.API;
+using Obsidian.Entities;
 using System;
-using System.Threading.Tasks;
 
 namespace Obsidian.Commands.Parsers
 {
-    public class LocationTypeParser : BaseArgumentParser<Position>
+    public class LocationTypeParser : BaseArgumentParser<PositionF>
     {
-        public override bool TryParseArgument(string input, BaseCommandContext context, out Position result)
+        public LocationTypeParser() : base("minecraft:vec3")
         {
-            result = null;
+        }
 
+        public override bool TryParseArgument(string input, CommandContext context, out PositionF result)
+        {
             var splitted = input.Split(' ');
-            var location = new Position();
+            var location = new PositionF();
 
             int count = 0;
-            var ctx = (ObsidianContext)context;
+            var ctx = context;
             foreach (var text in splitted)
             {
-                if (double.TryParse(text, out var doubleResult))
+                if (float.TryParse(text, out var floatResult))
                 {
                     switch (count)
                     {
                         case 0:
-                            location.X = doubleResult;
+                            location.X = floatResult;
                             break;
                         case 1:
-                            location.Y = doubleResult;
+                            location.Y = floatResult;
                             break;
                         case 2:
-                            location.Z = doubleResult;
+                            location.Z = floatResult;
                             break;
                         default:
                             throw new IndexOutOfRangeException("Count went out of range");
@@ -39,16 +39,17 @@ namespace Obsidian.Commands.Parsers
                 }
                 else if (text.Equals("~"))
                 {
+                    var player = (Player)ctx.Player;
                     switch (count)
                     {
                         case 0:
-                            location.X = ctx.Player.Location.X;
+                            location.X = player.Position.X;
                             break;
                         case 1:
-                            location.Y = ctx.Player.Location.Y;
+                            location.Y = player.Position.Y;
                             break;
                         case 2:
-                            location.Z = ctx.Player.Location.Z;
+                            location.Z = player.Position.Z;
                             break;
                         default:
                             throw new IndexOutOfRangeException("Count went out of range");

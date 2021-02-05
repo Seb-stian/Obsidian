@@ -1,16 +1,33 @@
 using Obsidian.Chat;
-using Obsidian.Serializer.Attributes;
+using Obsidian.Entities;
+using Obsidian.Serialization.Attributes;
+using System.Threading.Tasks;
 
 namespace Obsidian.Net.Packets.Login
 {
-    public class Disconnect : Packet
+    public partial class Disconnect : IPacket
     {
         [Field(0)]
-        private readonly ChatMessage Reason;
+        private ChatMessage Reason { get; set; }
 
-        public Disconnect(ChatMessage reason, ClientState state) : base(state == ClientState.Play ? 0x19 : 0x00)
+        public int Id { get; }
+
+        public byte[] Data { get; set; }
+
+        private Disconnect()
         {
+        }
+
+        public Disconnect(ChatMessage reason, ClientState state)
+        {
+            this.Id = state == ClientState.Play ? 0x19 : 0x00;
             this.Reason = reason;
         }
+
+        public Task WriteAsync(MinecraftStream stream) => Task.CompletedTask;
+
+        public Task ReadAsync(MinecraftStream stream) => Task.CompletedTask;
+
+        public Task HandleAsync(Server server, Player player) => Task.CompletedTask;
     }
 }

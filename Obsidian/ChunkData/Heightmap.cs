@@ -1,7 +1,5 @@
-﻿using Obsidian.Blocks;
+﻿using Obsidian.API;
 using Obsidian.Util.Collection;
-using Obsidian.Util.DataTypes;
-using Obsidian.Util.Extensions;
 using Obsidian.WorldData;
 using System;
 
@@ -13,11 +11,11 @@ namespace Obsidian.ChunkData
         public const string MOTION_BLOCKING = "MOTION_BLOCKING";
         public HeightmapType HeightmapType { get; set; }
 
-        internal readonly DataArray data = new DataArray(9, 256);
+        internal DataArray data = new DataArray(9, 256);
 
         private Chunk chunk;
 
-        public Predicate<BlockState> Predicate;
+        public Predicate<Block> Predicate;
 
         public Heightmap(HeightmapType type, Chunk chunk)
         {
@@ -25,10 +23,10 @@ namespace Obsidian.ChunkData
             this.chunk = chunk;
 
             if (type == HeightmapType.MotionBlocking)
-                this.Predicate = (block) => !block.IsAir || block.NotFluid();
+                this.Predicate = (block) => !block.IsAir || !block.IsFluid;
         }
 
-        public bool Update(int x, int y, int z, BlockState blockState)
+        public bool Update(int x, int y, int z, Block blockState)
         {
             int height = this.GetHeight(x, z);
 

@@ -1,7 +1,6 @@
 // This is the data about one world. It gets saved as level.dat.
 
-using Obsidian.Net.Packets.Play.Client;
-using Obsidian.PlayerData;
+using Obsidian.API;
 using System.Collections.Generic;
 
 namespace Obsidian.WorldData
@@ -185,7 +184,7 @@ namespace Obsidian.WorldData
         /// <summary>
         /// The NBT version of the level
         /// </summary>
-        public int vversion { get; private set; } = 19133;
+        public int Vversion { get; private set; } = 19133;
 
         /// <summary>
         /// Information about the Minecraft version the world was saved in.

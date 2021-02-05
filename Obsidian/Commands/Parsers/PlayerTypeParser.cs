@@ -1,29 +1,32 @@
-﻿using Obsidian.CommandFramework.ArgumentParsers;
-using Obsidian.CommandFramework.Entities;
+﻿using Obsidian.API;
 using Obsidian.Entities;
 using System;
 using System.Linq;
-using System.Threading.Tasks;
 
 namespace Obsidian.Commands.Parsers
 {
-    public class PlayerTypeParser : BaseArgumentParser<Player>
+    public class PlayerTypeParser : BaseArgumentParser<IPlayer>
     {
-        public override bool TryParseArgument(string input, BaseCommandContext context, out Player result)
+        public PlayerTypeParser() : base("obsidian:player")
         {
-            var ctx = (ObsidianContext)context;
+        }
+
+        public override bool TryParseArgument(string input, CommandContext context, out IPlayer result)
+        {
+            var ctx = context;
+            var server = (Server)ctx.Server;
 
             Player player = null;
 
-            if(Guid.TryParse(input, out Guid guid))
+            if (Guid.TryParse(input, out Guid guid))
             {
                 // is valid GUID, try find with guid
-                ctx.Server.OnlinePlayers.TryGetValue(guid, out player);
+                server.OnlinePlayers.TryGetValue(guid, out player);
             }
             else
             {
-                // is not valid guid, try find with name
-                player = ctx.Server.OnlinePlayers.FirstOrDefault(x => x.Value.Username == input).Value;
+                // is not valid GUID, try find with name
+                player = server.OnlinePlayers.FirstOrDefault(x => x.Value.Username == input).Value;
             }
 
             result = player;

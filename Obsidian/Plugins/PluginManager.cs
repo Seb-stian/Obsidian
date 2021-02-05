@@ -1,8 +1,11 @@
 ﻿using Microsoft.Extensions.Logging;
+using Obsidian.API;
 using Obsidian.API.Plugins;
+using Obsidian.Commands.Framework;
 using Obsidian.Plugins.PluginProviders;
 using Obsidian.Plugins.ServiceProviders;
 using Obsidian.Util.Extensions;
+using Obsidian.Util.Registry;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +13,7 @@ using System.Threading.Tasks;
 
 namespace Obsidian.Plugins
 {
-    public class PluginManager
+    public sealed class PluginManager
     {
         /// <summary>
         /// List of all loaded plugins.
@@ -27,31 +30,41 @@ namespace Obsidian.Plugins
         /// <summary>
         /// Utility class, responding to file changes inside watched directories.
         /// </summary>
-        public DirectoryWatcher DirectoryWatcher { get; } = new DirectoryWatcher();
+        public DirectoryWatcher DirectoryWatcher { get; } = new();
 
-        private readonly List<PluginContainer> plugins = new List<PluginContainer>();
-        private readonly List<PluginContainer> stagedPlugins = new List<PluginContainer>();
-        private readonly ServiceProvider serviceProvider = ServiceProvider.Create();
+        public PluginPermissions DefaultPermissions { get; set; } = PluginPermissions.None;
+
+        private readonly List<PluginContainer> plugins = new();
+        private readonly List<PluginContainer> stagedPlugins = new();
+        internal readonly ServiceProvider serviceProvider = ServiceProvider.Create();
         private readonly object eventSource;
-        private readonly List<EventContainer> events = new List<EventContainer>();
-        private readonly ILogger logger;
+        private readonly IServer server;
+        private readonly List<EventContainer> events = new();
+        internal readonly ILogger logger;
+        private readonly CommandHandler commands;
 
         private const string loadEvent = "OnLoad";
 
-        public PluginManager() : this(null, null)
+        public PluginManager(CommandHandler commands) : this(null, null, null, commands)
         {
         }
 
-        public PluginManager(object eventSource) : this(eventSource, null)
+        public PluginManager(object eventSource, CommandHandler commands) : this(eventSource, null, null, commands)
         {
         }
 
-        public PluginManager(object eventSource, ILogger logger)
+        public PluginManager(object eventSource, IServer server, CommandHandler commands) : this(eventSource, server, null, commands)
         {
+        }
+
+        public PluginManager(object eventSource, IServer server, ILogger logger, CommandHandler commands)
+        {
+            this.server = server;
             this.logger = logger;
             this.eventSource = eventSource;
+            this.commands = commands;
 
-            DirectoryWatcher.FileChanged += (path) =>
+            DirectoryWatcher.FileChanged += (path) => Task.Run(() =>
             {
                 var old = plugins.FirstOrDefault(plugin => plugin.Source == path) ??
                     stagedPlugins.FirstOrDefault(plugin => plugin.Source == path);
@@ -59,7 +72,7 @@ namespace Obsidian.Plugins
                     UnloadPlugin(old);
 
                 LoadPlugin(path);
-            };
+            });
             DirectoryWatcher.FileRenamed += OnPluginSourceRenamed;
             DirectoryWatcher.FileDeleted += OnPluginSourceDeleted;
 
@@ -74,9 +87,24 @@ namespace Obsidian.Plugins
         /// <param name="path">Path to load the plugin from. Can point either to local <b>DLL</b>, <b>C# code file</b> or a <b>GitHub project url</b>.</param>
         /// <param name="permissions">Permissions granted to the plugin.</param>
         /// <returns>Loaded plugin. If loading failed, <see cref="PluginContainer.Plugin"/> property will be null.</returns>
-        public PluginContainer LoadPlugin(string path, PluginPermissions permissions = PluginPermissions.None)
+        public PluginContainer LoadPlugin(string path) => LoadPlugin(path, DefaultPermissions);
+
+        /// <summary>
+        /// Loads a plugin from selected path.
+        /// <br/><b>Important note:</b> keeping references to plugin containers outside this class will make them unloadable.
+        /// </summary>
+        /// <param name="path">Path to load the plugin from. Can point either to local <b>DLL</b>, <b>C# code file</b> or a <b>GitHub project url</b>.</param>
+        /// <param name="permissions">Permissions granted to the plugin.</param>
+        /// <returns>Loaded plugin. If loading failed, <see cref="PluginContainer.Plugin"/> property will be null.</returns>
+        public PluginContainer LoadPlugin(string path, PluginPermissions permissions)
         {
             IPluginProvider provider = PluginProviderSelector.GetPluginProvider(path);
+            if (provider == null)
+            {
+                logger?.LogError($"Couldn't load plugin from path '{path}'");
+                return null;
+            }
+
             PluginContainer plugin = provider.GetPlugin(path, logger);
 
             return HandlePlugin(plugin, permissions);
@@ -88,7 +116,15 @@ namespace Obsidian.Plugins
         /// <param name="path">Path to load the plugin from. Can point either to local <b>DLL</b>, <b>C# code file</b> or a <b>GitHub project url</b>.</param>
         /// <param name="permissions">Permissions granted to the plugin.</param>
         /// <returns>Loaded plugin. If loading failed, <see cref="PluginContainer.Plugin"/> property will be null.</returns>
-        public async Task<PluginContainer> LoadPluginAsync(string path, PluginPermissions permissions = PluginPermissions.None)
+        public async Task<PluginContainer> LoadPluginAsync(string path) => await LoadPluginAsync(path, DefaultPermissions);
+
+        /// <summary>
+        /// Loads a plugin from selected path asynchronously.
+        /// </summary>
+        /// <param name="path">Path to load the plugin from. Can point either to local <b>DLL</b>, <b>C# code file</b> or a <b>GitHub project url</b>.</param>
+        /// <param name="permissions">Permissions granted to the plugin.</param>
+        /// <returns>Loaded plugin. If loading failed, <see cref="PluginContainer.Plugin"/> property will be null.</returns>
+        public async Task<PluginContainer> LoadPluginAsync(string path, PluginPermissions permissions)
         {
             IPluginProvider provider = PluginProviderSelector.GetPluginProvider(path);
             if (provider == null)
@@ -116,6 +152,9 @@ namespace Obsidian.Plugins
             plugin.Permissions = permissions;
             plugin.PermissionsChanged += OnPluginStateChanged;
 
+            plugin.Plugin.unload = () => UnloadPlugin(plugin);
+            plugin.Plugin.registerSingleCommand = (Action method) => this.commands.RegisterSingleCommand(method, plugin, null);
+
             if (plugin.IsReady)
             {
                 lock (plugins)
@@ -123,7 +162,17 @@ namespace Obsidian.Plugins
                     plugins.Add(plugin);
                 }
                 RegisterEvents(plugin);
-                plugin.Plugin.InvokeAsync(loadEvent).TryRunSynchronously();
+                InvokeOnLoad(plugin);
+                // Registering commands from within plugin
+                commands.RegisterCommandClass(plugin, plugin.Plugin.GetType(), plugin.Plugin);
+
+                // registering commands found in plugin assembly
+                var commandroots = plugin.Plugin.GetType().Assembly.GetTypes().Where(x => x.GetCustomAttributes(false).Any(y => y.GetType() == typeof(CommandRootAttribute)));
+                foreach (var root in commandroots)
+                {
+                    commands.RegisterCommandClass(plugin, root, null);
+                }
+                Registry.RegisterCommands((Server)this.server);
                 plugin.Loaded = true;
                 ExposePluginAsDependency(plugin);
             }
@@ -171,6 +220,8 @@ namespace Obsidian.Plugins
                 }
             }
 
+            commands.UnregisterPluginCommands(plugin);
+
             UnregisterEvents(plugin);
 
             foreach (var service in plugin.DisposableServices)
@@ -178,13 +229,23 @@ namespace Obsidian.Plugins
                 service.Dispose();
             }
 
-            if (plugin.Plugin is IDisposable disposable)
+            if (plugin.Plugin is IDisposable)
             {
-                disposable.Dispose();
+                var exception = plugin.Plugin.SafeInvoke("Dispose");
+                if (exception != null)
+                    logger?.LogError(exception, $"Unhandled exception occured when disposing {plugin.Info.Name}");
+            }
+            else if (plugin.Plugin is IAsyncDisposable)
+            {
+                var exception = plugin.Plugin.SafeInvokeAsync("DisposeAsync");
+                if (exception != null)
+                    logger?.LogError(exception, $"Unhandled exception occured when disposing {plugin.Info.Name}");
             }
 
             plugin.LoadContext.Unload();
             plugin.LoadContext.Unloading += _ => logger?.LogInformation($"Finished unloading {plugin.Info.Name} plugin");
+
+            plugin.Dispose();
         }
 
         /// <summary>
@@ -252,7 +313,7 @@ namespace Obsidian.Plugins
 
             if (!plugin.Loaded)
             {
-                plugin.Plugin.InvokeAsync(loadEvent).TryRunSynchronously();
+                InvokeOnLoad(plugin);
                 plugin.Loaded = true;
             }
 
@@ -293,7 +354,7 @@ namespace Obsidian.Plugins
             {
                 if (plugin.EventHandlers.TryGetValue(@event, out var handler))
                 {
-                    @event.Event.RemoveEventHandler(plugin, handler);
+                    @event.Event.RemoveEventHandler(eventSource, handler);
                     plugin.EventHandlers.Remove(@event);
                 }
             }
@@ -326,7 +387,19 @@ namespace Obsidian.Plugins
                 }
             }
         }
+
+        private void InvokeOnLoad(PluginContainer plugin)
+        {
+            var task = plugin.Plugin.FriendlyInvokeAsync(loadEvent, server).TryRunSynchronously();
+            if (task.Status == TaskStatus.Faulted)
+            {
+                logger?.LogError(task.Exception?.InnerException, $"Invoking {plugin.Info.Name}.{loadEvent} faulted.");
+            }
+        }
     }
 }
 
-// thank you Roxxel && artemD3V for the invasion <3
+// thank you Roxxel && DorrianD3V for the invasion <3
+// thank you Jonpro03 for your awesome contributions
+// thank you Sebastian for your amazing plugin framework <3
+// thank you Tides, Craftplacer for being part of the team early on <3

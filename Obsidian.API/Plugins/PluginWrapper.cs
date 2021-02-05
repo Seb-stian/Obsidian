@@ -7,13 +7,13 @@ namespace Obsidian.API.Plugins
     /// </summary>
     public abstract class PluginWrapper
     {
-        private PluginBase plugin;
-        
+        internal PluginBase plugin;
+
         public PluginWrapper()
         {
 
         }
-        
+
         /// <summary>
         /// Invokes a method in the class. For repeated calls use <see cref="GetMethod{T}(string, Type[])">GetMethod</see> or make a plugin wrapper.
         /// </summary>

@@ -1,4 +1,4 @@
-﻿using Obsidian.Blocks;
+﻿using Obsidian.API.Events;
 using Obsidian.Entities;
 
 namespace Obsidian.Events.EventArgs

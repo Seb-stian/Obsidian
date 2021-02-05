@@ -1,6 +1,6 @@
-﻿using Obsidian.Blocks;
-using Obsidian.Net;
+﻿using Obsidian.Net;
 using Obsidian.Util.Registry;
+using System;
 using System.Threading.Tasks;
 
 namespace Obsidian.ChunkData
@@ -21,7 +21,7 @@ namespace Obsidian.ChunkData
         {
             for (int id = 0; id < BlockStateCount; id++)
             {
-                if (this.BlockStateArray[id] == blockState)
+                if (this.BlockStateArray[id].StateId == blockState.StateId)
                     return id;
             }
 
@@ -37,8 +37,8 @@ namespace Obsidian.ChunkData
 
         public Block GetStateFromIndex(int index)
         {
-            if (index > this.BlockStateCount - 1)
-               return null;
+            if (index > this.BlockStateCount - 1 || index < 0)
+               throw new IndexOutOfRangeException();
 
             return this.BlockStateArray[index];
         }
@@ -48,14 +48,14 @@ namespace Obsidian.ChunkData
             await stream.WriteVarIntAsync(this.BlockStateCount);
 
             for (int i = 0; i < this.BlockStateCount; i++)
-                await stream.WriteVarIntAsync(this.BlockStateArray[i].Id);
+                await stream.WriteVarIntAsync(this.BlockStateArray[i].StateId);
         }
 
         public async Task ReadFromAsync(MinecraftStream stream)
         {
             var length = await stream.ReadVarIntAsync();
 
-            for(int i = 0; i < length; i++)
+            for (int i = 0; i < length; i++)
             {
                 int stateId = await stream.ReadVarIntAsync();
 

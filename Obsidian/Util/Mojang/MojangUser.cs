@@ -1,7 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Threading.Tasks;
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Obsidian.Net;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Obsidian.Util.Mojang
 {
@@ -43,6 +43,18 @@ namespace Obsidian.Util.Mojang
             await stream.WriteBooleanAsync(isSigned);
             if (isSigned)
                 await stream.WriteStringAsync(this.Signature, 32767);
+
+            return stream.ToArray();
+        }
+
+        public byte[] ToArray()
+        {
+            using var stream = new MinecraftStream();
+            stream.WriteString(Name);
+            stream.WriteString(Value);
+            stream.WriteBoolean(Signature is not null);
+            if (Signature is not null)
+                stream.WriteString(Signature);
 
             return stream.ToArray();
         }

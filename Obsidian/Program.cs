@@ -1,57 +1,32 @@
-﻿using Microsoft.Extensions.Logging;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Serialization;
-using Obsidian.Chat;
-using Obsidian.Util;
-using Obsidian.Util.Converters;
-using Obsidian.Util.DataTypes;
-using Obsidian.Util.Registry.Enums;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+
+using Microsoft.CodeAnalysis;
+
+using Newtonsoft.Json;
+
+using Obsidian.Util;
+using Obsidian.Util.Extensions;
 
 namespace Obsidian
 {
     public static class Program
     {
-        private static Dictionary<int, Server> Servers = new Dictionary<int, Server>();
-        private static TaskCompletionSource<bool> cancelKeyPress = new TaskCompletionSource<bool>();
+        private static readonly Dictionary<int, Server> Servers = new();
+        private static readonly TaskCompletionSource<bool> cancelKeyPress = new();
+        private static bool shutdownPending;
 
-        public static GlobalConfig GlobalConfig { get; private set; }
+        /// <summary>
+        /// Event handler for Windows console events
+        /// </summary>
+        private static NativeMethods.HandlerRoutine _windowsConsoleEventHandler;
         private const string globalConfigFile = "global_config.json";
-
-        public static Random Random = new Random();
-
-        internal static ILogger PacketLogger { get; set; }
-
-        internal static DefaultContractResolver contractResolver = new DefaultContractResolver
-        {
-            NamingStrategy = new SnakeCaseNamingStrategy()
-        };
-
-        public static JsonSerializerSettings JsonSettings = new JsonSerializerSettings
-        {
-            ContractResolver = contractResolver,
-            Converters = new List<JsonConverter>
-            {
-                new DefaultEnumConverter<CustomDirection>(),
-                new DefaultEnumConverter<Axis>(),
-                new DefaultEnumConverter<Face>(),
-                new DefaultEnumConverter<BlockFace>(),
-                new DefaultEnumConverter<Half>(),
-                new DefaultEnumConverter<Hinge>(),
-                new DefaultEnumConverter<Instruments>(),
-                new DefaultEnumConverter<Part>(),
-                new DefaultEnumConverter<Shape>(),
-                new DefaultEnumConverter<CustomDirection>(),
-                new DefaultEnumConverter<MinecraftType>(),
-                new DefaultEnumConverter<Attachment>(),
-                new DefaultEnumConverter<ETextAction>()
-            }
-        };
 
         private static async Task Main()
         {
@@ -59,6 +34,11 @@ namespace Obsidian
             string version = "0.1";
 #else
             string version = "0.1-DEV";
+            string asmpath = Assembly.GetExecutingAssembly().Location;
+            //This will strip just the working path name:
+            //C:\Program Files\MyApplication
+            string asmdir = Path.GetDirectoryName(asmpath);
+            Environment.CurrentDirectory = asmdir;
 #endif
             // Kept for consistant number parsing
             CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
@@ -68,21 +48,31 @@ namespace Obsidian
             Console.ForegroundColor = ConsoleColor.Black;
             Console.WriteLine(asciilogo);
             Console.ResetColor();
+            Console.WriteLine($"A C# implementation of the Minecraft server protocol. Targeting: {Server.protocol.GetDescription()}");
 
-            Console.CancelKeyPress += OnConsoleCancelKeyPressed;
-
-            if (File.Exists(globalConfigFile))
+            // Hook into Windows' native console closing events, otherwise use .NET's native event.
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {
-                GlobalConfig = JsonConvert.DeserializeObject<GlobalConfig>(File.ReadAllText(globalConfigFile));
+                _windowsConsoleEventHandler += new NativeMethods.HandlerRoutine(OnConsoleEvent);
+                NativeMethods.SetConsoleCtrlHandler(_windowsConsoleEventHandler, true);
             }
             else
             {
-                GlobalConfig = new GlobalConfig();
-                File.WriteAllText(globalConfigFile, JsonConvert.SerializeObject(GlobalConfig, Formatting.Indented));
+                Console.CancelKeyPress += OnConsoleCancelKeyPressed;
+            }
+
+            if (File.Exists(globalConfigFile))
+            {
+                Globals.Config = JsonConvert.DeserializeObject<GlobalConfig>(File.ReadAllText(globalConfigFile));
+            }
+            else
+            {
+                Globals.Config = new GlobalConfig();
+                File.WriteAllText(globalConfigFile, JsonConvert.SerializeObject(Globals.Config, Formatting.Indented));
                 Console.WriteLine("Created new global configuration file");
             }
 
-            for (int i = 0; i < GlobalConfig.ServerCount; i++)
+            for (int i = 0; i < Globals.Config.ServerCount; i++)
             {
                 string serverDir = $"Server-{i}";
 
@@ -112,17 +102,36 @@ namespace Obsidian
 
             await Task.WhenAny(cancelKeyPress.Task, Task.WhenAll(serverTasks));
 
-            Console.WriteLine("Server(s) killed. Press any key to return...");
-            Console.ReadKey(intercept: false);
+            if (!shutdownPending)
+            {
+                Console.WriteLine("Server(s) killed. Press any key to return...");
+                Console.ReadKey(intercept: false);
+            }
         }
 
         private static void OnConsoleCancelKeyPressed(object sender, ConsoleCancelEventArgs e)
         {
             e.Cancel = true;
+            StopProgram();
+            cancelKeyPress.SetResult(true);
+        }
+
+        private static bool OnConsoleEvent(NativeMethods.CtrlType ctrlType)
+        {
+            Console.WriteLine("Received {0}", ctrlType);
+            StopProgram();
+            return true;
+        }
+
+        /// <summary>
+        /// Gracefully shuts sub-servers down and exits Obsidian.
+        /// </summary>
+        private static void StopProgram()
+        {
+            shutdownPending = true;
+
             foreach (var (_, server) in Servers)
                 server.StopServer();
-
-            cancelKeyPress.SetResult(true);
         }
 
         // Cool startup console logo because that's cool

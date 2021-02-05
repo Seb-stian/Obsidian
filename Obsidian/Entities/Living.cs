@@ -1,17 +1,14 @@
-﻿using Obsidian.Net;
-using Obsidian.Net.Packets.Play.Client;
-using Obsidian.Util.DataTypes;
-using System;
+﻿using Obsidian.API;
+using Obsidian.Net;
 using System.Threading.Tasks;
 
 namespace Obsidian.Entities
 {
-    public class Living : Entity
+    public class Living : Entity, ILiving
     {
-        
         public LivingBitMask LivingBitMask { get; set; }
 
-        public float Health { get; set; }
+        public float Health { get; set; } = 1.0f;
 
         public uint ActiveEffectColor { get; private set; }
 
@@ -22,8 +19,6 @@ namespace Obsidian.Entities
         public int AbsorbtionAmount { get; set; }
 
         public Position BedBlockPosition { get; set; }
-
-        
 
         public override async Task WriteAsync(MinecraftStream stream)
         {
@@ -41,18 +36,35 @@ namespace Obsidian.Entities
 
             await stream.WriteEntityMetdata(12, EntityMetadataType.VarInt, this.AbsorbtionAmount);
 
-            await stream.WriteEntityMetdata(13, EntityMetadataType.OptPosition, this.BedBlockPosition, this.BedBlockPosition != null);
+            await stream.WriteEntityMetdata(13, EntityMetadataType.OptPosition, this.BedBlockPosition, this.BedBlockPosition != API.Position.Zero);
         }
 
-    }
+        public override void Write(MinecraftStream stream)
+        {
+            base.Write(stream);
 
-    [Flags]
-    public enum LivingBitMask : byte
-    {
-        None = 0x00,
+            stream.WriteEntityMetadataType(7, EntityMetadataType.Byte);
+            stream.WriteByte((byte)LivingBitMask);
 
-        HandActive = 0x01,
-        ActiveHand = 0x02,
-        InRiptideSpinAttack = 0x04
+            stream.WriteEntityMetadataType(8, EntityMetadataType.Float);
+            stream.WriteFloat(Health);
+
+            stream.WriteEntityMetadataType(9, EntityMetadataType.VarInt);
+            stream.WriteVarInt((int)ActiveEffectColor);
+
+            stream.WriteEntityMetadataType(10, EntityMetadataType.Boolean);
+            stream.WriteBoolean(AmbientPotionEffect);
+
+            stream.WriteEntityMetadataType(11, EntityMetadataType.VarInt);
+            stream.WriteVarInt(AbsorbedArrows);
+
+            stream.WriteEntityMetadataType(12, EntityMetadataType.VarInt);
+            stream.WriteVarInt(AbsorbtionAmount);
+
+            stream.WriteEntityMetadataType(13, EntityMetadataType.OptPosition);
+            stream.WriteBoolean(BedBlockPosition != default);
+            if (BedBlockPosition != default)
+                stream.WritePositionF(BedBlockPosition);
+        }
     }
 }

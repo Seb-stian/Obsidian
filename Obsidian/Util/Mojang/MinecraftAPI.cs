@@ -1,15 +1,15 @@
-﻿using System.Collections.Generic;
+﻿using Newtonsoft.Json;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
 
 namespace Obsidian.Util.Mojang
 {
     public class MinecraftAPI
     {
-        public static HttpClient Http = new HttpClient();
+        public static HttpClient Http = Globals.HttpClient;
 
         public static async Task<List<MojangUser>> GetUsersAsync(string[] usernames)
         {
